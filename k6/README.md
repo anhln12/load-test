@@ -1,6 +1,18 @@
 Kiểm tra tải của server K6: https://k6.io
 
-Cài đặt
+K6 là gì?
+
+Để kiểm thử một hệ thống CNTT, một trong số bài test cực kỳ quan trọng mang tên load testing (Kiểm thử test).
+
+Để thực hiện load testing, ta cần phải quân tâm tới nhiều thứ, từ việc mô phỏng một số lượng user cùng lức truy cập, mô phỏng lượng use thay đổi theo thời gian tới việc theo dõi, ghi lại và tính toán các con số, cùng vô vàn những thứ phức tạp khác.
+
+Chính vì vậy, k6 được sinh ra để giúp việc thực thi những chuyện đó trở nên dễ dàng và tối ưu nhất cho các developer, tester, sysadmin ... 
+
+K6 tên đầy đủ là Grafana k6, là một công cụ hỗ trợ load testing được phát triển bởi Grafana Labs và cộng đồng, nó là dự án mã nguồn mở và thể mở rộng. k6 hỗ trợ tốt cho mô hình CI/CD, dễ dàng tính hợp vào các CI/CD như tools như Jenkins, Azure Pipeliné.
+
+K6 được phát triển bằng Go tuy nhiên test script được viết bằng JavaScript giúp chúng ta dễ dàng tiếp cân và sử dụng. Công cụ này nổi bật với tính năng đơn giản và hiệu năng mà nó mang lại.
+
+1. Cài đặt
 
 K6.io phát hành các gói cài đặt và sử dụng trên rất nhiều hệ điều hành, hệ thống như linux, mac, window, docker….
 
@@ -17,7 +29,7 @@ Mac (brew)
 brew install k6
 ```
 
-Kiểm tra độ chịu tải với k6
+2. Một vài thành phần quan trọng của test script và giải thích test output
 
 Vì K6 sử dụng file javascript để chạy test nên khá dễ dàng tiếp cận. Chúng ta tạo một file với homepage.js đơn giản với nội dung sau:
 ```
@@ -60,4 +72,95 @@ vus........................: 100    min=100 max=100
 vus_max....................: 100    min=100 max=100
 ```
 
-Đây là 1 case đơn giản. Trên thực tế thì phức tạp hơn trong thực tế thì user thường tương tác với Server theo một kịch bản chứ không chỉ đơn thuần là gửi request, hay số lượng user tăng lên hay giảm đi.
+Đây là 1 case load test trang web bằng k6 đơn giản. Trên thực tế thì phức tạp hơn trong thực tế thì user thường tương tác với Server theo một kịch bản chứ không chỉ đơn thuần là gửi request, hay số lượng user tăng lên hay giảm đi.
+
+Bây giờ chúng ta sẽ tìm hiểu về cả test script và test output
+
+Những khái niệm cơ bản
+
+Cùng xem lại script này, nó là 1 file JavaScript thuần
+
+Trong file script, ta đã export hai thành phần cơ bản của k6:
+* Default function: mỗi test script luôn phải export một default function, nó mô tả công việc mà mỗi VUs làm và lặp đi lặp lại trong suốt quá trình test.
+* Options: định nghĩa test-run behavior, cấu hình của k6 có thể nằm ở nhiều nơi, và khi có cùng một giá trị cấu hình được đặt ở nhiều nơi thì k6 sẽ lấy giá trị ở nơi có độ ưu tiên cao hơn, cụ thể bạn tham khảo tại đây https://grafana.com/docs/k6/latest/using-k6/k6-options/how-to/#order-of-precedence
+
+Ví dụ, chung ta chạy command line:
+```
+k6 run --vus 20 homepage.js
+```
+
+Khi đó, options ở bên ngoài command sẽ đè lên options ở bên trong script: options 20 VUs sẽ override lại 10 VUs ở bên trong.
+
+Có rất nhiều options cho k6, nhưng trước tiên mình muốn giới thiệu về hai options là VUs và duration.
+* VUs trong k6 về cơ bản là các vòng lặp while(true) chạy song song
+* Duration chính là thời gian thực thi của test này
+
+Như vậy script trên thì công việc mô phỏng 10 users cùng truy cập liên tục trong 30s, có nghỉ 1ms giữa 2 lần liên tiếp của mỗi user nhờ câu lệnh sleep(1)
+
+Có một options nữa cũng rất hay dùng đó là iterations, nó được hiểu là tổng số lần các VUs thực thi default function
+```
+export const options = {
+  vus: 10,
+  iterations: 100,
+};
+```
+
+Ví dụ với options trên, 10 VUs sẽ chia nhau chạy sao cho đủ 100 lần công việc trong default function là kết thúc test. Chú ý là thời gian hoàn thành mỗi vòng lặp của mỗi VUs có thể khác nhau nên không có nghĩa là một VUs sẽ chạy đúng 10 vòng lặp.
+
+Có một câu hỏi thú vị mà mình muốn chia sẻ với các bạn ở phần này là:
+
+Có thể có tối đa bao nhiêu Virtual Users cho mỗi test script như thế này?
+
+Câu trả lời là tùy thuộc vào phần cứng mà script này đang hoạt động trên đó.
+
+Result output
+
+Trước tiên, chúng ta xem thử các con số trong test result này sinh ra như thế nào.
+
+k6 tạo tải cho web của bạn, sau đó nó đo lường kết quả của hệ thống theo thời gian thực (real - time) dựa vào những kết quả trả về, do đó đa số các số liệu trong report ở dạng thống kê, đồ thị sẽ thay đổi theo thời gian. Report mà chúng ta thấy ở console chính là số liệu đo ở thời điểm kết thúc thử nghiệm (end of test summary), cùng các thông số đặc trưng của bên xác suất thông kế như:
+- Average (avg): giá trị trung bình
+- Minimum (min): giá trị nhỏ nhất
+- Maximum (max): giá trị lớn nhất
+- Medium (med): trung vị, tức là giá trị ở giữa sau khi sắp xếp các kết quả lại
+- Percentiles(p): bách phân vị, ví dụ như http_req_duration có thông số p(90)=384.33ms thì có ý nghĩa là có 90% các request có duration nhỏ hơn 384.33ms
+
+Nếu muốn, các bạn cũng có thể thử cài và tìm cách xem những phiên bản report có màu mè hay đồ thị ở đây: https://grafana.com/blog/how-to-visualize-load-testing-results/
+
+3. k6 test lifecycle
+
+Từ test script đơn giản ở phần trước, chúng ra thấy là có một options và một default options định nghĩa hành động test. Vậy ngoài hai phần trên thì một test script có thể có những thành phần nào?
+Những thành phần đó sẽ đóng vai trò gì trong quá trình chạy test? Hãy cùng nhau tìm hiểu vòng đời của một k6 test để trả lời những câu hỏi trên.
+
+Test scripts của k6 gồm bốn thành phần: init (bắt buộc), setup, VU code (bắt buộc) và teardown.
+
+```
+// 1. init code
+export function setup() {
+  // 2. setup code
+  const data = '';
+  return data;
+}
+
+export default function (data) {
+  // 3. VU code
+}
+
+export function teardown(data) {
+  // 4. teardown code
+}
+```
+
+|Thành phần|Mục đích|Ví dụ|Số lần gọi|
+|---|---|---|---|
+|init (required)|Import modules, load files, định nghĩa options, khai báo các hàm (hàm tự định nghĩa hoặc các hàm đặc biệt như handleSummary())|Import thư viện, khai báo options.|1 lần cho mỗi VUs|
+|setup (optional)|Setup, cung cấp data cho tất cả VUs|Lấy dữ liệu từ một trang web khác về để cho vào body trong http request ở VUs code.|1 lần cho cả quá trình test|
+|VU code (required)|Mô phỏng công việc của từng VU|Gửi http requests, validate response|Tùy thuộc vào options|
+|teardown (optional)|Hậu xử lý data của setup, dừng các test environment|Validate kết quả của setup, gửi thông tin rằng test đã hoàn thành.|1 lần cho cả quá trình test|
+
+
+
+
+
+
+
+
