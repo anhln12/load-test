@@ -157,10 +157,231 @@ export function teardown(data) {
 |VU code (required)|Mô phỏng công việc của từng VU|Gửi http requests, validate response|Tùy thuộc vào options|
 |teardown (optional)|Hậu xử lý data của setup, dừng các test environment|Validate kết quả của setup, gửi thông tin rằng test đã hoàn thành.|1 lần cho cả quá trình test|
 
+**Khái niệm Checks?**
 
+Checks dùng để kiểm tra một điều kiện đúng sai trong test của bạn và xuất ra trong output. 
 
+Người ta thường dùng checks để kiểm tra xem response trả về của request có đúng như mong đợi hay không.
 
+Ví dụ: Sử dụng checks để kiểm tra các response trả về có trả về status 200 OK hay không, vùng với 2 checks kiểm tra tính chất của body trả về.
 
+```
+import { check } from 'k6';
+import http from 'k6/http';
 
+export default function () {
+  const res = http.get('http://test.k6.io/');
+  check(res, {
+    'is status 200': (r) => r.status === 200,
+    'body size is 11,105 bytes': (r) => r.body.length == 11105,
+    'is body contain k6': (r) => r.body.includes('k6')
+  });
+}
+```
 
+**Thresholds (Ngưỡng)**
 
+Thresholds là những tiêu chí mà bạn mong muốn hệ thống của mình đạt được. Nó là ngưỡng để xem xét test của bạn là pass hay fail
+
+Sau đây cách cấu hình thresholds
+```
+export const options = {
+    thresholds: {
+      metric_name: [
+        {
+          threshold: 'p(99) < 10', // string
+          abortOnFail: true, // boolean
+          delayAbortEval: '10s', // string
+          /*...*/
+        },
+      ],
+    },
+  };
+```
+
+Trong đó:
+- metric_name là thành phần những thông số trong output bạn muốn đặt thresholds.
+- threshold là phần định nghĩa thresholds lên thông số. Tùy theo từng loại metric mà có cách định nghĩa khác nhau, các bạn có thể xem thêm tại đây nhé. https://grafana.com/docs/k6/latest/using-k6/thresholds
+- abortOnFail xác định xem có nên ngưng test ngay tại thời điểm test không thỏa mãn thresholds hay không.
+- delayAbortEval do quá trình xét thresholds là liên tục nên nếu ta muốn delay một khoảng thời gian để thu thập thêm dữ liệu giữa những lần xét thì có thể setting ở đây.
+
+Một ví dụ
+```
+import http from 'k6/http';
+import { check } from 'k6';
+
+export const options = {
+  vus: 50,
+  duration: '10s',
+  thresholds: {
+    // the rate of successful checks should be higher than 90%
+    checks: ['rate>0.9'],
+  },
+};
+
+export default function () {
+  const res = http.get('http://test.k6.io/');
+  check(res, {
+    'is status 200': (r) => r.status === 200,
+    'body size is 11,105 bytes': (r) => r.body.length == 11105,
+    'is body contain k6': (r) => r.body.includes('k6')
+  });
+}
+```
+
+**Tags (nhãn)**
+
+Gán nhãn (tag) là thành phần bổ trợ rất tốt trong quá trình viết script cho k6.
+
+Chúng ta có thể gán nhãn những thành phần như requests, checks, thresholds, custom metrics để dễ phân loại, hình dung và sử dụng trong suốt quá trình viết test script và xem output.
+
+Sau đây là một ví dụ về cách sử dụng tags kết hợp với thresholds ở phần trên:
+
+```
+import http from 'k6/http';
+import { sleep } from 'k6';
+
+export const options = {
+  thresholds: {
+    'http_req_duration{type:API}': ['p(95)<1000'], // threshold on API requests only
+    'http_req_duration{type:staticContent}': ['p(95)<500'], // threshold on static content only
+  },
+};
+
+export default function () {
+  //api request
+  const apiRes1 = http.get('https://test-api.k6.io/public/crocodiles/1/', {
+    tags: { type: 'API' },
+  });
+  const apiRes2 = http.get('https://test-api.k6.io/public/crocodiles/2/', {
+    tags: { type: 'API' },
+  });
+
+  //static content request
+  const contentResponses = http.batch([
+    ['GET', 'https://test-api.k6.io/static/favicon.ico', null, { tags: { type: 'staticContent' } }],
+    [
+      'GET',
+      'https://test-api.k6.io/static/css/site.css',
+      null,
+      { tags: { type: 'staticContent' } },
+    ],
+  ]);
+
+  sleep(1);
+}
+```
+
+(Lưu ý: trong ví dụ trên có sử dụng batch, bạn tìm hiểu thêm [tại đây](https://grafana.com/docs/k6/latest/javascript-api/k6-http/batch/) nhé)
+
+Qua ví dụ, các bạn có thể thấy chúng ta vừa gán nhãn cho 2 requests chịu trách nhiệm về phần API, 2 requests chịu trách nhiệm về phần static content, nhờ đó mà ở phần options chúng ta có thể định nghĩa thresholds một cách rõ ràng nhờ các tags này
+
+**Scenarios (kịch bản)**
+
+Scenarios là một phần rất thú vị và quan trọng của k6. Được định nghĩa là những kịch bản chi tiết trong quá trình diễn ra test, scenarios có liên quan đến số lượng VUs và interations. Nó thường được dùng để mô tả những tình hình thực tế của tải.
+
+Chúng ta sẽ định nghĩa scenarios ở phần options, cụ thể như sau:
+```
+export const options = {
+  scenarios: {
+    example_scenario: {
+      // name of the executor to use
+      executor: 'shared-iterations',
+
+      // common scenario configuration
+      startTime: '10s',
+      gracefulStop: '5s',
+      env: { EXAMPLEVAR: 'testing' },
+      tags: { example_tag: 'testing' },
+
+      // executor-specific configuration
+      vus: 10,
+      iterations: 200,
+      maxDuration: '10s',
+    },
+    another_scenario: {
+      /*...*/
+    },
+  },
+};
+```
+
+Có 3 thành phần chính của một scenario option:
+
+Executor
+
+Executor (bộ phận thực thi) sắp xếp khối lượng công việc của VU trong k6.
+
+Chúng ta sẽ dùng những executors được định nghĩa sẵn để đưa vào options. Các executors được định nghĩa sẵn được phân loại theo các tiêu chí:
+
+* Dựa theo số lượng iterations cho mỗi VU
+- shared-iterations: các VUs sẽ tính chung iterations và chạy đủ iterations ở phần cấu hình
+- per-vu-iterations: mỗi VU sẽ chạy đúng số iterations đã định nghĩa ở phần cấu hình
+* Dựa theo số lượng VUs
+- constant-VUs: các VUs sau khi khởi tạo sẽ được giữ cố định trong suốt quá trình test
+- ramping-VUs: số lượng VUs sẽ thay đổi theo thời gian
+* Dựa theo lượng iterations trên đơn vị thời gian, gọi là iteration rate
+- constant-arrival-rate: giữ số lượng iterations ở mức cho trước và ổn định theo thời gian
+- ramping-arrival-rate: tăng giảm số lượng iterations theo thời gian
+
+Common configuration
+
+Cấu hình chung cho cả kịch bản, gồm những loại như thời gian bắt đầu (startTime), nhãn (tags),…
+
+Specific configuration
+
+Với mỗi loại executor thì sẽ có những cấu hình đặc trưng, cần phải được khai báo.
+
+Mời các bạn xem kỹ hơn về các executor và specific configuration của nó tại đây.
+
+Thử nghiệm
+
+Để dễ dàng hình dung, chúng ta cùng tạo thử và áp dụng nhé.
+```
+import http from 'k6/http';
+
+export const options = {
+  discardResponseBodies: true,
+  scenarios: {
+    contacts: {
+      executor: 'ramping-vus',
+      exec: 'contacts',
+      startVUs: 0,
+      stages: [
+        { duration: '20s', target: 50 },
+        { duration: '10s', target: 0 },
+      ],
+      gracefulRampDown: '0s',
+    },
+    news: {
+      executor: 'per-vu-iterations',
+      exec: 'news',
+      vus: 50,
+      iterations: 100,
+      startTime: '30s',
+      maxDuration: '1m',
+    },
+  },
+};
+
+export function contacts() {
+  http.get('https://test.k6.io/contacts.php', {
+    tags: { my_custom_tag: 'contacts' },
+  });
+}
+
+export function news() {
+  http.get('https://test.k6.io/news.php', { tags: { my_custom_tag: 'news' } });
+}
+```
+
+Nhìn vào script, chúng ta có một scenario tên là contacts dùng executor ramping-vus, cái còn lại là news dùng executor per-vu-iterations. Trong scenario contacts, ta có thể thấy các specific options:
+- startVUs: chỉ định số VUs khởi đầu
+- stages: miêu tả sự thay đổi của số lượng VUs
+- gracefulRampDown: thời gian chờ các iterations đã start hoàn thành trước khi tắt VU đang chạy nó.
+
+Như vậy, script này mô tả có một lượng user truy cập liên tục vào trang contacts, tăng từ 0 lên 50 trong 20s rồi giảm về lại 0 trong vòng 10s tiếp theo. Sau 30s đó, có 50 user vào trang news, mỗi người truy cập 100 lần.
+
+Ở ví dụ này, bên cạnh giới thiệu về cách cấu hình scenarios, ta cũng thấy được:
+- Cách định nghĩa hành động test nhưng không dùng default function.
+- Cách sử dụng startTime để sắp xếp thứ tự chạy cho các scenarios.
